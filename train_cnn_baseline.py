@@ -76,7 +76,7 @@ else:
 
 from tensorflow.keras.callbacks import ModelCheckpoint
 
-checkpoint = ModelCheckpoint('./models/cnn_baseline.h5',
+checkpoint = ModelCheckpoint('./models/MobileNetV2_baseline.h5',
                              monitor='val_accuracy',
                              verbose=1,
                              save_best_only=True
@@ -107,10 +107,14 @@ val_generator = generator_batch(
 )
 
 # validation acc: 80%+, at least > 70%
+# Epoch 100/100
+# 80/80 [==============================] - 85s 1s/step - loss: 1.8314 - accuracy: 0.8366 - val_loss: 1.8178 - val_accuracy: 0.8188
+#
+# Epoch 00100: val_accuracy improved from 0.81250 to 0.81875, saving model to ./models/MobileNetV2_baseline.h5
 baseline_model.fit(train_generator,
-                   steps_per_epoch=len(train_img_path) // batch_size,
+                   steps_per_epoch=len(train_img_path) // batch_size + 1,
                    validation_data=val_generator,
-                   validation_steps=len(val_img_path) // batch_size,
+                   validation_steps=len(val_img_path) // batch_size + 1,
                    verbose=1,
                    shuffle=True,  # 一个batch中进行shuffle
                    epochs=nbr_epochs,
