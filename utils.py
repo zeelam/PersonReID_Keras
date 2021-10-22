@@ -3,6 +3,7 @@
 # @Function :
 import numpy as np
 import imgaug as ia
+import random
 from imgaug import augmenters as iaa
 
 sometimes = lambda aug: iaa.Sometimes(0.5, aug)
@@ -81,14 +82,38 @@ seq = iaa.Sequential(
     random_order=True
 )
 
+
+def triplet_loss(y_true, y_pred, alpha=0.3):
+    # y_pred: anchor, pos, neg feature embedding (concatenate)
+    from tensorflow.keras import backend as K
+    y_pred = K.l2_normalize(y_pred, axis=1)
+
+    batch_num = y_pred.shape.as_list()[-1] / 3
+
+    anchor = y_pred[:, 0: batch_num]
+    positive = y_pred[batch_num: batch_num * 2]
+    negative = y_pred[batch_num * 2: batch_num * 3]
+
+    # distance between the anchor and the positive
+    pos_dist = K.sum(K.square(anchor - positive), axis=1)
+
+    # distance between the anchor and the negative
+    neg_dist = K.sum(K.square(anchor - negative), axis=1)
+
+    basic_loss = pos_dist - neg_dist + alpha
+    loss = K.maximum(basic_loss, 0)  # ReLU
+
+    return loss
+
+
 # label smoothing --> reduce overfitting
 # [0, 1, 0, 0] --> theta = 0.1 --> 1 ==> 1 - 0.1, 0 ==> 0.033 = 0.1 / N
 # after label smoothing: [0.1 / 3, 0.9, 0.1 / 3, 0.1 /3]
-
 def cross_entropy_label_smoothing(y_true, y_pred):
     from tensorflow.keras.losses import categorical_crossentropy
     label_smoothing = 0.1
     return categorical_crossentropy(y_true, y_pred, label_smoothing=label_smoothing)
+
 
 def load_img_batch(img_path_list, img_label_list, nbr_classes,
                    img_width, img_height):
@@ -117,6 +142,7 @@ def load_img_batch(img_path_list, img_label_list, nbr_classes,
         return X_batch, Y_batch
     else:
         return X_batch
+
 
 def generator_batch(img_path_list, img_label_list, nbr_classes,
                     img_width, img_height, batch_size=32,
@@ -160,6 +186,59 @@ def generator_batch(img_path_list, img_label_list, nbr_classes,
         X_batch = (X_batch - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
 
         yield X_batch, Y_batch
+
+def generator_batch_triplet_hard(img_path_list, img_label_list, nbr_classes,
+                    img_width, img_height, P=16, K=4,
+                    shuffle=False, save_to_dir=None,
+                    augment=False):
+
+    assert len(img_path_list) == len(img_label_list), \
+        "# imag_path_list is not equal with # img_label_list"
+
+    # batch_size = P * K
+
+    if shuffle:
+        from sklearn.utils import shuffle as shuffle_tuple
+        img_path_list, img_label_list = shuffle_tuple(img_path_list, img_label_list)
+
+    dic = {}
+    for img_label, img_path in zip(img_label_list, img_path_list):
+        dic.setdefault(img_label, []).append(img_path)
+
+    person_ids_list = [k for k in dic.keys() if len(dic[k]) > K]
+
+    while True:
+        person_ids_sampled = random.sample(person_ids_list, k=P)
+
+        img_path_sampled = [random.sample(dic[person_id], k=K) for person_id in person_ids_sampled]
+
+        img_path_sampled_list = []
+
+        [img_path_sampled_list.extend(w) for w in img_path_sampled]
+
+        person_ids_sampled_list = []
+
+        tmp_sampled_list = [[w] * K for w in person_ids_sampled]
+
+        [person_ids_sampled_list.extend(w) for w in tmp_sampled_list]
+
+        X_batch, Y_batch = load_img_batch(img_path_sampled_list, person_ids_sampled_list,
+                                          nbr_classes, img_width, img_height)
+        y_batch = np.array(person_ids_sampled_list)
+
+        if augment:
+            X_batch = X_batch.astype(np.uint8)
+            X_batch_aug = seq.augment_images(X_batch)
+            X_batch = X_batch_aug
+
+        if save_to_dir:
+            pass
+
+        X_batch = X_batch / 255.0
+        X_batch = (X_batch - np.array([0.485, 0.456, 0.406])) / np.array([0.229, 0.224, 0.225])
+
+        yield (X_batch, [Y_batch, y_batch])
+
 
 def generator_batch_predict(img_path_list,
                     img_width, img_height, batch_size=32):
